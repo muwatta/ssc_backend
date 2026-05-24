@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     SetInitialPasswordView,
+    CreateUserView,
     StaffIDRegistryListCreateView,
     StaffIDRegistryDetailView,
     MemberListCreateView,
@@ -14,6 +15,9 @@ from .views import (
 urlpatterns = [
     # Password setup (first login — no auth required)
     path("set-password/", SetInitialPasswordView.as_view(), name="set-password"),
+
+    # Admin create user
+    path("users/", CreateUserView.as_view(), name="user-create"),
 
     # My own profile
     path("me/", MyProfileView.as_view(), name="my-profile"),

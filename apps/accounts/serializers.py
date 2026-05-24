@@ -89,6 +89,41 @@ class SetInitialPasswordSerializer(serializers.Serializer):
 
 
 # ─────────────────────────────────────────────────────────────────
+# ADMIN: Create User (Admin UI)
+# ─────────────────────────────────────────────────────────────────
+
+class CreateUserSerializer(serializers.Serializer):
+    staff_id = serializers.CharField()
+    role = serializers.ChoiceField(choices=Role.choices, default=Role.STAFF)
+    password = serializers.CharField(min_length=8, write_only=True)
+    is_first_login = serializers.BooleanField(default=False)
+
+    def validate_staff_id(self, value):
+        # Staff ID must already exist in the registry and be active
+        if not StaffIDRegistry.objects.filter(staff_id=value, is_active=True).exists():
+            raise serializers.ValidationError("This Staff ID is not registered or has been deactivated.")
+        if User.objects.filter(staff_id=value).exists():
+            raise serializers.ValidationError("A user account already exists for this Staff ID.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        staff_id = validated_data["staff_id"]
+        password = validated_data["password"]
+        role = validated_data.get("role", Role.STAFF)
+        is_first_login = validated_data.get("is_first_login", False)
+
+        user = User.objects.create_user(staff_id=staff_id, password=password)
+        user.role = role
+        user.is_first_login = is_first_login
+        if role == Role.ADMIN:
+            user.is_staff = True
+            user.is_superuser = True
+        user.save()
+        return user
+
+
+# ─────────────────────────────────────────────────────────────────
 # MEMBER PROFILE
 # ─────────────────────────────────────────────────────────────────
 

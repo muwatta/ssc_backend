@@ -22,6 +22,7 @@ from .models import User, StaffIDRegistry, MemberProfile
 from .serializers import (
     SSCTokenObtainPairSerializer,
     StaffIDRegistrySerializer,
+    CreateUserSerializer,
     MemberProfileSerializer,
     MemberProfileSummarySerializer,
     CreateMemberSerializer,
@@ -133,6 +134,23 @@ class StaffIDRegistryDetailView(generics.RetrieveUpdateDestroyAPIView):
             )
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─────────────────────────────────────────────────────────────────
+# ADMIN: Create User (Admin only)
+# ─────────────────────────────────────────────────────────────────
+
+class CreateUserView(generics.CreateAPIView):
+    """
+    POST /api/v1/accounts/users/
+    Admin creates a user (staff/committee/admin). Requires Staff ID already in registry.
+    Body: { "staff_id": "S43-0002", "role": "staff", "password": "Temp@2026!", "is_first_login": false }
+    """
+    serializer_class = CreateUserSerializer
+    permission_classes = [IsAdmin]
+
+    def perform_create(self, serializer):
+        serializer.save()
 
 
 # ─────────────────────────────────────────────────────────────────
