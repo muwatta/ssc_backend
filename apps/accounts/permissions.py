@@ -70,6 +70,21 @@ class IsAdminOrCommitteeOrHOS(BasePermission):
         )
 
 
+class IsProfileOwnerOrAdmin(BasePermission):
+    """
+    Allows profile updates by the owner or by Admin.
+    """
+    message = "Only the profile owner or Admin can update this profile."
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.role == Role.ADMIN:
+            return True
+        return getattr(obj, 'user', None) == request.user
+
+
 class CanPostSavings(BasePermission):
     """
     SRS Rule S3: Savings are posted by Admin ONLY.

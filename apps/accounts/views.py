@@ -28,7 +28,12 @@ from .serializers import (
     CreateMemberSerializer,
     SetInitialPasswordSerializer,
 )
-from .permissions import IsAdmin, IsAdminOrCommittee, IsAdminOrCommitteeOrHOS
+from .permissions import (
+    IsAdmin,
+    IsAdminOrCommittee,
+    IsAdminOrCommitteeOrHOS,
+    IsProfileOwnerOrAdmin,
+)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -207,7 +212,7 @@ class MemberDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [IsAdmin()]
+            return [IsProfileOwnerOrAdmin()]
         return [IsAuthenticated()]
 
 
