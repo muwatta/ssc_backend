@@ -109,31 +109,26 @@ class UserManager(BaseUserManager):
 #────────────────
 
 class User(AbstractBaseUser, PermissionsMixin):
-    """
-    The authentication model for SSC.
-
-    staff_id    → used ONLY for login (school-issued)
-    role        → drives all permission checks at API level
-    is_first_login → forces password change on first access
-
-    SRS Section 3: roles are Admin, Committee, Head of School, Staff.
-    """
+   
     staff_id = models.CharField(
-        max_length=10,
+        max_length=20,
         unique=True,
-        validators=[staff_id_validator],
+        validators=[RegexValidator(r'^S\d{2}-\d{4}$', 'Format must be SYY-NNNN, e.g. S43-0094')]
     )
+
     role = models.CharField(
         max_length=20,
         choices=Role.choices,
         default=Role.STAFF,
     )
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)   # Django admin access
     is_first_login = models.BooleanField(
         default=True,
         help_text="Forces password creation on first access"
     )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -192,12 +187,6 @@ class User(AbstractBaseUser, PermissionsMixin):
             return None
 
 
-#────────────────
-# SSC FILE NUMBER GENERATOR
-# Auto-assigns next sequential number.
-# Format: A + zero-padded integer (e.g. A001, A048, A100)
-# Legacy members: Admin imports with existing number preserved.
-#────────────────
 
 def generate_file_number():
     """
@@ -212,11 +201,7 @@ def generate_file_number():
     return f"A{next_num:03d}", next_num
 
 
-#────────────────
-# MEMBER PROFILE
-# One-to-one with User. Holds all fields from SRS Section 2.4.
-# Created when Admin approves a membership application.
-#────────────────
+# member profile
 
 class MemberProfile(models.Model):
     """
@@ -240,7 +225,7 @@ class MemberProfile(models.Model):
         help_text="Internal integer for sequential generation. Do not edit."
     )
 
-    # ── Personal (SRS 2.4 — Personal section) ──────────────────────
+    # ── Personal
     full_name = models.CharField(max_length=255)
     phone_primary = models.CharField(max_length=20)
     phone_secondary = models.CharField(max_length=20, blank=True, default="")
@@ -256,8 +241,6 @@ class MemberProfile(models.Model):
 
     # ── Financial (SRS 2.4 — Financial section) ────────────────────
     monthly_income = models.DecimalField(max_digits=12, decimal_places=2)
-    # Note: approved_monthly_contribution is managed by SavingsChangeRequest
-    # This field stores the CURRENTLY APPROVED amount.
     approved_monthly_contribution = models.DecimalField(
         max_digits=12,
         decimal_places=2,
