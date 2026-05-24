@@ -1,25 +1,10 @@
--- ═══════════════════════════════════════════════════════════════
--- SOLACE STAFF COOPERATIVE LTD (SSC)
--- Supabase / PostgreSQL Schema — Phase 1
--- Run this entire file in Supabase SQL Editor
--- ═══════════════════════════════════════════════════════════════
-
--- ─────────────────────────────────────────────────────────────────
--- ENUMS
--- ─────────────────────────────────────────────────────────────────
-
 CREATE TYPE user_role AS ENUM ('admin', 'committee', 'head_of_school', 'staff');
 CREATE TYPE marital_status AS ENUM ('single', 'married', 'divorced', 'widowed');
 CREATE TYPE gender_type AS ENUM ('male', 'female');
 CREATE TYPE membership_status AS ENUM ('pending', 'active', 'inactive', 'exited');
 CREATE TYPE school_branch AS ENUM ('primary', 'college', 'other');
 
--- ─────────────────────────────────────────────────────────────────
--- TABLE: ssc_staff_id_registry
--- Admin pre-loads valid Staff IDs here.
--- Only IDs in this table can register/login.
--- SRS Section 2.3
--- ─────────────────────────────────────────────────────────────────
+
 
 CREATE TABLE ssc_staff_id_registry (
     id          BIGSERIAL PRIMARY KEY,
@@ -34,11 +19,6 @@ CREATE TABLE ssc_staff_id_registry (
 
 CREATE INDEX idx_staff_id_registry_staff_id ON ssc_staff_id_registry(staff_id);
 
--- ─────────────────────────────────────────────────────────────────
--- TABLE: ssc_users
--- Custom auth user. Login = Staff ID.
--- SRS Section 2.1, 3
--- ─────────────────────────────────────────────────────────────────
 
 CREATE TABLE ssc_users (
     id              BIGSERIAL PRIMARY KEY,
@@ -59,16 +39,10 @@ CREATE TABLE ssc_users (
 CREATE INDEX idx_ssc_users_staff_id ON ssc_users(staff_id);
 CREATE INDEX idx_ssc_users_role ON ssc_users(role);
 
--- Add FK now that ssc_users exists
 ALTER TABLE ssc_staff_id_registry
     ADD CONSTRAINT fk_registry_created_by
     FOREIGN KEY (created_by_id) REFERENCES ssc_users(id) ON DELETE SET NULL;
 
--- ─────────────────────────────────────────────────────────────────
--- TABLE: ssc_member_profiles
--- Full membership form. One-to-one with ssc_users.
--- SRS Section 2.4 — all fields from the physical form.
--- ─────────────────────────────────────────────────────────────────
 
 CREATE TABLE ssc_member_profiles (
     id                          BIGSERIAL PRIMARY KEY,
@@ -135,20 +109,6 @@ CREATE INDEX idx_member_profiles_membership_status ON ssc_member_profiles(member
 CREATE INDEX idx_member_profiles_school_branch ON ssc_member_profiles(school_branch);
 CREATE INDEX idx_member_profiles_full_name ON ssc_member_profiles(full_name);
 
--- ─────────────────────────────────────────────────────────────────
--- TABLE: token_blacklist_outstandingtoken
--- TABLE: token_blacklist_blacklistedtoken
--- djangorestframework-simplejwt blacklist tables
--- Created by Django migration but we define them here for reference.
--- DO NOT create these manually — let Django migrate handle them.
--- ─────────────────────────────────────────────────────────────────
-
--- (Leave JWT blacklist tables to Django migrations)
-
--- ─────────────────────────────────────────────────────────────────
--- UPDATED_AT trigger function
--- Auto-updates updated_at on any row change.
--- ─────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -170,22 +130,7 @@ CREATE TRIGGER update_member_profiles_updated_at
     BEFORE UPDATE ON ssc_member_profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ─────────────────────────────────────────────────────────────────
--- ROW LEVEL SECURITY (RLS)
--- Supabase enables RLS by default.
--- Since Django manages all DB access through the service role,
--- we disable RLS on these tables and let Django's permission
--- layer handle access control (as required by SRS Section 3).
--- ─────────────────────────────────────────────────────────────────
 
 ALTER TABLE ssc_staff_id_registry DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ssc_users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ssc_member_profiles DISABLE ROW LEVEL SECURITY;
-
--- ═══════════════════════════════════════════════════════════════
--- VERIFICATION QUERIES
--- Run these after executing the schema to confirm everything is OK
--- ═══════════════════════════════════════════════════════════════
-
--- SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
--- SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'ssc_member_profiles' ORDER BY ordinal_position;
