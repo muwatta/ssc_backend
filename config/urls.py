@@ -1,8 +1,3 @@
-"""
-SSC Cooperative — Root URL Configuration
-All API routes are versioned under /api/v1/
-"""
-
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -10,15 +5,10 @@ from apps.accounts.views import SSCTokenObtainPairView, LogoutView
 
 
 urlpatterns = [
-    # Django admin (keep for dev convenience, restrict in prod via middleware if needed)
     path("admin/", admin.site.urls),
-
-    # ─── Authentication ───────────────────────────────────────────────
     path("api/v1/auth/login/", SSCTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/v1/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/v1/auth/logout/", LogoutView.as_view(), name="logout"),
-
-    # ─── App routers ──────────────────────────────────────────────────
     path("api/v1/accounts/", include("apps.accounts.urls")),
     path("api/v1/savings/", include("apps.savings.urls")),
     path("api/v1/loans/", include("apps.loans.urls")),

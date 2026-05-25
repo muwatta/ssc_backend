@@ -1,15 +1,20 @@
 from django.urls import path
-
 from .views import (
-    MemberSavingsBalanceView,
-    MemberSavingsLedgerListView,
-    PostSavingsView,
-    PostDuesView,
+    PostSavingsView, MemberLedgerView, MemberBalanceView,
+    MyBalanceView, MyLedgerView,
+    SavingsChangeRequestListCreateView, ApproveSavingsChangeView, RejectSavingsChangeView,
+    DuesCycleListCreateView, PostDuesCycleView,
 )
 
 urlpatterns = [
-    path('balance/<int:member_id>/', MemberSavingsBalanceView.as_view(), name='savings-balance'),
-    path('ledger/<int:member_id>/', MemberSavingsLedgerListView.as_view(), name='savings-ledger'),
-    path('post/', PostSavingsView.as_view(), name='savings-post'),
-    path('dues/', PostDuesView.as_view(), name='savings-dues'),
+    path("post/",                          PostSavingsView.as_view(),                    name="savings-post"),
+    path("my-balance/",                    MyBalanceView.as_view(),                      name="my-balance"),
+    path("my-ledger/",                     MyLedgerView.as_view(),                       name="my-ledger"),
+    path("balance/<int:member_id>/",       MemberBalanceView.as_view(),                  name="member-balance"),
+    path("ledger/<int:member_id>/",        MemberLedgerView.as_view(),                   name="member-ledger"),
+    path("change-requests/",              SavingsChangeRequestListCreateView.as_view(),  name="change-request-list"),
+    path("change-requests/<int:pk>/approve/", ApproveSavingsChangeView.as_view(),        name="change-request-approve"),
+    path("change-requests/<int:pk>/reject/",  RejectSavingsChangeView.as_view(),         name="change-request-reject"),
+    path("dues/",                          DuesCycleListCreateView.as_view(),            name="dues-list"),
+    path("dues/<int:pk>/post/",            PostDuesCycleView.as_view(),                  name="dues-post"),
 ]

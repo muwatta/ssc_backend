@@ -199,6 +199,19 @@ class MemberProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if request is None or request.user.is_anonymous:
+            raise serializers.ValidationError("Authentication is required to create a profile.")
+
+        file_number, file_sequence = generate_file_number()
+        return MemberProfile.objects.create(
+            user=request.user,
+            file_number=file_number,
+            _file_sequence=file_sequence,
+            **validated_data,
+        )
+
 
 class MemberProfileSummarySerializer(serializers.ModelSerializer):
     """

@@ -1,24 +1,10 @@
-"""
-SSC Cooperative — Islamic (Hijri) Calendar Utilities
-
-SRS Section 1.1:
-  "SSC uses the Islamic (Hijri) calendar as its primary record-keeping calendar.
-   All savings entries, loan records, repayment schedules, and dues are dated
-   by Islamic month and year. The Gregorian date is recorded alongside."
-
-Usage:
-  from utils.hijri import HIJRI_MONTHS, hijri_month_display, current_hijri
-"""
-
 from hijri_converter import convert
 from datetime import date
 
 
-# ─────────────────────────────────────────────────────────────────
 # ISLAMIC MONTH CONSTANTS
 # Stored as integers (1–12) in the DB.
 # Displayed as Arabic names in the UI.
-# ─────────────────────────────────────────────────────────────────
 
 HIJRI_MONTHS = [
     (1,  "Muharram"),

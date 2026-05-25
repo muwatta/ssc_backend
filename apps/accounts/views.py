@@ -1,13 +1,3 @@
-"""
-SSC Cooperative — Accounts Views
-
-Auth flow:
-  1. Admin pre-loads Staff ID into registry
-  2. Staff logs in with Staff ID — system validates against registry
-  3. On first login, user is redirected to set their password
-  4. JWT issued — 8-hour access token, 7-day refresh
-"""
-
 from rest_framework import generics, status, filters
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -34,11 +24,7 @@ from .permissions import (
     IsAdminOrCommitteeOrHOS,
     IsProfileOwnerOrAdmin,
 )
-
-
-# ─────────────────────────────────────────────────────────────────
-# AUTHENTICATION
-# ─────────────────────────────────────────────────────────────────
+# Authentication views (login/logout, password setup)
 
 class SSCTokenObtainPairView(TokenObtainPairView):
     """
@@ -96,9 +82,9 @@ class SetInitialPasswordView(APIView):
         )
 
 
-# ─────────────────────────────────────────────────────────────────
+
 # STAFF ID REGISTRY — Admin only
-# ─────────────────────────────────────────────────────────────────
+
 
 class StaffIDRegistryListCreateView(generics.ListCreateAPIView):
     """
@@ -141,9 +127,9 @@ class StaffIDRegistryDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ─────────────────────────────────────────────────────────────────
+
 # ADMIN: Create User (Admin only)
-# ─────────────────────────────────────────────────────────────────
+
 
 class CreateUserView(generics.CreateAPIView):
     """
@@ -158,9 +144,9 @@ class CreateUserView(generics.CreateAPIView):
         serializer.save()
 
 
-# ─────────────────────────────────────────────────────────────────
+
 # MEMBER MANAGEMENT — Admin only
-# ─────────────────────────────────────────────────────────────────
+
 
 class MemberListCreateView(generics.ListCreateAPIView):
     """
@@ -228,20 +214,24 @@ class MemberSummaryListView(generics.ListAPIView):
     search_fields = ["file_number", "full_name"]
 
     def get_queryset(self):
+        # Do not select_related('user') here — only a lightweight member
+        # summary is required for dropdowns. Using select_related together
+        # with `only()` can cause Django to attempt to traverse a deferred
+        # field which raises a FieldError. Keep this queryset simple.
         return MemberProfile.objects.filter(
             membership_status="active"
-        ).select_related("user").only(
+        ).only(
             "id", "file_number", "full_name", "school_branch",
             "designation", "membership_status"
         )
 
 
-class MyProfileView(generics.RetrieveAPIView):
+class MyProfileView(APIView):
     """
     GET /api/v1/accounts/me/
-    Returns the logged-in user's own profile.
+    POST /api/v1/accounts/me/  - create the current user's profile if missing.
+    PATCH /api/v1/accounts/me/ - update the current user's own profile.
     """
-    serializer_class = MemberProfileSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
@@ -250,8 +240,51 @@ class MyProfileView(generics.RetrieveAPIView):
                 user=self.request.user
             )
         except MemberProfile.DoesNotExist:
+            return None
+
+    def get(self, request):
+        profile = self.get_object()
+        if profile is None:
             from rest_framework.exceptions import NotFound
-            raise NotFound("Profile not found. Contact Admin.")
+            msg = (
+                "Profile not found. Please create your Member Profile by filling "
+                "out the profile form. If you cannot create a profile, contact an "
+                "administrator."
+            )
+            raise NotFound(msg)
+
+        serializer = MemberProfileSerializer(profile)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if self.get_object() is not None:
+            return Response(
+                {"detail": "A profile already exists for this user."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = MemberProfileSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        return Response(MemberProfileSerializer(profile).data, status=status.HTTP_201_CREATED)
+
+    def patch(self, request):
+        profile = self.get_object()
+        if profile is None:
+            return Response(
+                {"detail": "Profile not found. Create a profile first."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = MemberProfileSerializer(
+            profile,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        return Response(MemberProfileSerializer(profile).data)
 
 
 class ApproveMemberView(APIView):

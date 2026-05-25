@@ -1,248 +1,239 @@
-from decimal import Decimal
+"""SSC Cooperative — Savings Views"""
 
-from django.db import transaction
-from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
-from django.utils.dateparse import parse_date
-from rest_framework import filters, generics, status
-from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
+from rest_framework import generics, status, filters
 from rest_framework.views import APIView
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from django.utils import timezone
 
-from apps.accounts.models import MemberProfile, Role
-from apps.accounts.permissions import CanPostSavings
-from .models import SavingsLedger, SavingsEntryType
-from .serializers import SavingsLedgerSerializer
-
-
-class SavingsPagination(PageNumberPagination):
-    page_size = 10
-    page_size_query_param = 'page_size'
-
-
-def _authorize_member_access(request, member: MemberProfile):
-    if request.user.role in (Role.ADMIN, Role.COMMITTEE, Role.HEAD_OF_SCHOOL):
-        return
-    if member.user != request.user:
-        raise PermissionDenied('You do not have permission to view this member savings data.')
-
-
-class MemberSavingsBalanceView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, member_id):
-        member = get_object_or_404(MemberProfile, id=member_id)
-        _authorize_member_access(request, member)
-
-        last_entry = SavingsLedger.objects.filter(member=member).order_by('-created_at').first()
-        balance = last_entry.balance if last_entry else Decimal('0.00')
-
-        return Response(
-            {
-                'member_id': member.id,
-                'file_number': member.file_number,
-                'full_name': member.full_name,
-                'total_savings': f'{balance:.2f}',
-                'suretyship_committed': '0.00',
-                'available_balance': f'{balance:.2f}',
-            }
-        )
-
-
-class MemberSavingsLedgerListView(generics.ListAPIView):
-    serializer_class = SavingsLedgerSerializer
-    permission_classes = [IsAuthenticated]
-    pagination_class = SavingsPagination
-    filter_backends = [filters.SearchFilter]
-    search_fields = ['details', 'entry_type']
-
-    def get_queryset(self):
-        member = get_object_or_404(MemberProfile, id=self.kwargs['member_id'])
-        _authorize_member_access(self.request, member)
-
-        queryset = SavingsLedger.objects.filter(member=member).order_by('-created_at')
-
-        hijri_month = self.request.query_params.get('hijri_month')
-        hijri_year = self.request.query_params.get('hijri_year')
-        date_from = self.request.query_params.get('date_from')
-        date_to = self.request.query_params.get('date_to')
-
-        if hijri_month is not None:
-            try:
-                queryset = queryset.filter(hijri_month=int(hijri_month))
-            except ValueError:
-                raise ValidationError('hijri_month must be an integer.')
-
-        if hijri_year is not None:
-            try:
-                queryset = queryset.filter(hijri_year=int(hijri_year))
-            except ValueError:
-                raise ValidationError('hijri_year must be an integer.')
-
-        if date_from:
-            parsed_from = parse_date(date_from)
-            if not parsed_from:
-                raise ValidationError('date_from must be a valid YYYY-MM-DD date.')
-            queryset = queryset.filter(gregorian_date__gte=parsed_from)
-
-        if date_to:
-            parsed_to = parse_date(date_to)
-            if not parsed_to:
-                raise ValidationError('date_to must be a valid YYYY-MM-DD date.')
-            queryset = queryset.filter(gregorian_date__lte=parsed_to)
-
-        return queryset
-
-    def get(self, request, *args, **kwargs):
-        if request.query_params.get('format') == 'csv':
-            queryset = self.filter_queryset(self.get_queryset())
-            return self._render_csv(queryset)
-        return super().get(request, *args, **kwargs)
-
-    def _render_csv(self, queryset):
-        import csv
-
-        field_names = [
-            'created_at',
-            'gregorian_date',
-            'hijri_month',
-            'hijri_year',
-            'hijri_display',
-            'entry_type',
-            'details',
-            'credit',
-            'debit',
-            'balance',
-            'verified_by_name',
-            'verified_by_role',
-        ]
-
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="savings_ledger_{self.kwargs["member_id"]}.csv"'
-
-        writer = csv.writer(response)
-        writer.writerow(field_names)
-
-        for entry in queryset:
-            writer.writerow([
-                entry.created_at.isoformat(),
-                entry.gregorian_date.isoformat(),
-                entry.hijri_month,
-                entry.hijri_year,
-                entry.hijri_display,
-                entry.entry_type,
-                f'{entry.details}',
-                f'{entry.credit:.2f}' if entry.credit is not None else '',
-                f'{entry.debit:.2f}' if entry.debit is not None else '',
-                f'{entry.balance:.2f}',
-                entry.verified_by_name,
-                entry.verified_by_role,
-            ])
-
-        return response
+from apps.accounts.models import MemberProfile
+from apps.accounts.permissions import IsAdmin, IsAdminOrCommittee, IsAdminOrCommitteeOrHOS
+from .models import SavingsLedger, MemberBalance, SavingsChangeRequest, TermlyDuesCycle
+from .serializers import (
+    SavingsLedgerSerializer, MemberBalanceSerializer,
+    PostSavingsSerializer, SavingsChangeRequestSerializer,
+    ApproveSavingsChangeSerializer, TermlyDuesCycleSerializer,
+    CreateDuesCycleSerializer,
+)
+from .services import (
+    post_savings_entry, post_termly_dues,
+    apply_savings_change, get_or_create_balance,
+)
 
 
 class PostSavingsView(APIView):
-    permission_classes = [CanPostSavings]
+    """POST /api/v1/savings/post/ — Admin posts monthly savings"""
+    permission_classes = [IsAdmin]
 
     def post(self, request):
-        member_id = request.data.get('member')
-        amount = request.data.get('amount')
-        hijri_month = request.data.get('hijri_month')
-        hijri_year = request.data.get('hijri_year')
-        hijri_display = request.data.get('hijri_display')
-        details = request.data.get('details', 'Monthly savings deposit')
+        serializer = PostSavingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        member = d["_member"]
 
-        if not member_id or not amount:
-            raise ValidationError('Member ID and amount are required.')
-
-        member = get_object_or_404(MemberProfile, id=member_id)
-
-        try:
-            amount_decimal = Decimal(str(amount))
-        except Exception:
-            raise ValidationError('Amount must be a valid number.')
-
-        if amount_decimal <= 0:
-            raise ValidationError('Amount must be greater than zero.')
-
-        previous_entry = SavingsLedger.objects.filter(member=member).order_by('-created_at').first()
-        previous_balance = previous_entry.balance if previous_entry else Decimal('0.00')
-        new_balance = previous_balance + amount_decimal
-
-        entry = SavingsLedger.objects.create(
+        entry = post_savings_entry(
             member=member,
-            entry_type=SavingsEntryType.ORDINARY_SAVINGS,
-            details=details,
-            hijri_month=hijri_month or timezone.now().month,
-            hijri_year=hijri_year or timezone.now().year,
-            hijri_display=hijri_display or '',
-            credit=amount_decimal,
-            debit=None,
-            balance=new_balance,
-            verified_by_name=request.user.staff_id or str(request.user),
-            verified_by_role=request.user.role,
+            amount=d["amount"],
+            hijri_month=d["hijri_month"],
+            hijri_year=d["hijri_year"],
+            posted_by=request.user,
+        )
+        return Response(SavingsLedgerSerializer(entry).data, status=status.HTTP_201_CREATED)
+
+
+class MemberLedgerView(generics.ListAPIView):
+    """GET /api/v1/savings/ledger/<member_id>/ — savings ledger for a member"""
+    serializer_class = SavingsLedgerSerializer
+    filter_backends  = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["hijri_year", "entry_type"]
+    ordering         = ["hijri_year", "hijri_month", "created_at"]
+
+    def get_permissions(self):
+        return [IsAdminOrCommitteeOrHOS()] if self._is_admin_request() else [__import__('rest_framework.permissions', fromlist=['IsAuthenticated']).IsAuthenticated()]
+
+    def _is_admin_request(self):
+        user = self.request.user
+        return user.role in ("admin", "committee", "head_of_school")
+
+    def get_queryset(self):
+        member_id = self.kwargs["member_id"]
+        user = self.request.user
+        if user.role in ("admin", "committee", "head_of_school"):
+            return SavingsLedger.objects.filter(member_id=member_id).select_related("member")
+        # Staff: only own ledger
+        return SavingsLedger.objects.filter(
+            member_id=member_id, member__user=user
+        ).select_related("member")
+
+
+class MemberBalanceView(APIView):
+    """GET /api/v1/savings/balance/<member_id>/"""
+    permission_classes = [IsAdminOrCommitteeOrHOS]
+
+    def get(self, request, member_id):
+        try:
+            member = MemberProfile.objects.get(pk=member_id)
+        except MemberProfile.DoesNotExist:
+            return Response({"error": "Member not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == "staff":
+            if member.user != request.user:
+                return Response({"error": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        balance = get_or_create_balance(member)
+        return Response(MemberBalanceSerializer(balance).data)
+
+
+class MyBalanceView(APIView):
+    """GET /api/v1/savings/my-balance/ — logged-in member's own balance"""
+    def get(self, request):
+        try:
+            profile = request.user.member_profile
+        except Exception:
+            return Response({"error": "No member profile found."}, status=status.HTTP_404_NOT_FOUND)
+        balance = get_or_create_balance(profile)
+        return Response(MemberBalanceSerializer(balance).data)
+
+
+class MyLedgerView(generics.ListAPIView):
+    """GET /api/v1/savings/my-ledger/ — logged-in member's own ledger"""
+    serializer_class = SavingsLedgerSerializer
+
+    def get_queryset(self):
+        try:
+            profile = self.request.user.member_profile
+            return SavingsLedger.objects.filter(member=profile).order_by("hijri_year", "hijri_month")
+        except Exception:
+            return SavingsLedger.objects.none()
+
+
+# ── Savings Change Requests ───────────────────────────────────────
+
+class SavingsChangeRequestListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/v1/savings/change-requests/"""
+    serializer_class = SavingsChangeRequestSerializer
+    filter_backends  = [DjangoFilterBackend]
+    filterset_fields = ["status"]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role in ("admin", "committee"):
+            return SavingsChangeRequest.objects.select_related("member").all()
+        try:
+            return SavingsChangeRequest.objects.filter(member__user=user)
+        except Exception:
+            return SavingsChangeRequest.objects.none()
+
+    def perform_create(self, serializer):
+        from decimal import Decimal
+        profile = self.request.user.member_profile
+        balance = get_or_create_balance(profile)
+        # Get current loan balance
+        from apps.loans.models import LoanApplication, LoanStatus
+        active_loan = LoanApplication.objects.filter(
+            applicant=profile, status=LoanStatus.ACTIVE
+        ).first()
+        loan_balance = active_loan.outstanding_balance if active_loan else Decimal("0.00")
+
+        serializer.save(
+            member=profile,
+            current_amount=profile.approved_monthly_contribution,
+            savings_balance_at_request=balance.total_savings,
+            loan_balance_at_request=loan_balance,
         )
 
-        serializer = SavingsLedgerSerializer(entry)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class ApproveSavingsChangeView(APIView):
+    """POST /api/v1/savings/change-requests/<id>/approve/"""
+    permission_classes = [IsAdmin]
+
+    def post(self, request, pk):
+        try:
+            change_req = SavingsChangeRequest.objects.get(pk=pk, status="pending")
+        except SavingsChangeRequest.DoesNotExist:
+            return Response({"error": "Request not found or not pending."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ApproveSavingsChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+
+        result = apply_savings_change(
+            change_request=change_req,
+            approved_by=request.user,
+            hijri_month=d["effective_hijri_month"],
+            hijri_year=d["effective_hijri_year"],
+        )
+        return Response(SavingsChangeRequestSerializer(result).data)
 
 
-class PostDuesView(APIView):
-    permission_classes = [CanPostSavings]
+class RejectSavingsChangeView(APIView):
+    """POST /api/v1/savings/change-requests/<id>/reject/"""
+    permission_classes = [IsAdmin]
 
-    def post(self, request):
-        amount = request.data.get('amount')
-        hijri_month = request.data.get('hijri_month')
-        hijri_year = request.data.get('hijri_year')
-        hijri_display = request.data.get('hijri_display')
-        member_ids = request.data.get('member_ids')
-        details = request.data.get('description', 'Termly dues charge')
+    def post(self, request, pk):
+        try:
+            change_req = SavingsChangeRequest.objects.get(pk=pk, status="pending")
+        except SavingsChangeRequest.DoesNotExist:
+            return Response({"error": "Request not found or not pending."}, status=status.HTTP_404_NOT_FOUND)
+        change_req.status = "rejected"
+        change_req.save(update_fields=["status"])
+        return Response(SavingsChangeRequestSerializer(change_req).data)
 
-        if not amount:
-            raise ValidationError('Amount is required.')
+
+# ── Termly Dues ───────────────────────────────────────────────────
+
+class DuesCycleListCreateView(generics.ListCreateAPIView):
+    """GET/POST /api/v1/savings/dues/"""
+    permission_classes = [IsAdmin]
+    filter_backends    = [DjangoFilterBackend]
+    filterset_fields   = ["is_posted", "hijri_year"]
+
+    def get_serializer_class(self):
+        return CreateDuesCycleSerializer if self.request.method == "POST" else TermlyDuesCycleSerializer
+
+    def get_queryset(self):
+        return TermlyDuesCycle.objects.all().order_by("-hijri_year", "-hijri_month")
+
+    def create(self, request, *args, **kwargs):
+        from utils.hijri import hijri_month_display
+        serializer = CreateDuesCycleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+
+        cycle = TermlyDuesCycle.objects.create(
+            name=d["name"],
+            amount=d["amount"],
+            description=d["description"],
+            hijri_month=d["hijri_month"],
+            hijri_year=d["hijri_year"],
+            hijri_display=hijri_month_display(d["hijri_month"], d["hijri_year"]),
+            posted_by=request.user,
+        )
+        if d["member_ids"]:
+            members = MemberProfile.objects.filter(pk__in=d["member_ids"])
+            cycle.target_members.set(members)
+
+        return Response(TermlyDuesCycleSerializer(cycle).data, status=status.HTTP_201_CREATED)
+
+
+class PostDuesCycleView(APIView):
+    """POST /api/v1/savings/dues/<id>/post/ — actually debit members"""
+    permission_classes = [IsAdmin]
+
+    def post(self, request, pk):
+        try:
+            cycle = TermlyDuesCycle.objects.get(pk=pk)
+        except TermlyDuesCycle.DoesNotExist:
+            return Response({"error": "Dues cycle not found."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            amount_decimal = Decimal(str(amount))
-        except Exception:
-            raise ValidationError('Amount must be a valid number.')
+            result = post_termly_dues(cycle=cycle, posted_by=request.user)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if amount_decimal <= 0:
-            raise ValidationError('Amount must be greater than zero.')
-
-        queryset = MemberProfile.objects.filter(membership_status='active')
-        if member_ids:
-            queryset = queryset.filter(id__in=member_ids)
-
-        with transaction.atomic():
-            entries = []
-            for member in queryset:
-                previous_entry = SavingsLedger.objects.filter(member=member).order_by('-created_at').first()
-                previous_balance = previous_entry.balance if previous_entry else Decimal('0.00')
-                new_balance = previous_balance - amount_decimal
-                entry = SavingsLedger.objects.create(
-                    member=member,
-                    entry_type=SavingsEntryType.TERMLY_DUES,
-                    details=details,
-                    hijri_month=hijri_month or timezone.now().month,
-                    hijri_year=hijri_year or timezone.now().year,
-                    hijri_display=hijri_display or '',
-                    debit=amount_decimal,
-                    credit=None,
-                    balance=new_balance,
-                    verified_by_name=request.user.staff_id or str(request.user),
-                    verified_by_role=request.user.role,
-                )
-                entries.append(entry)
-
-        return Response(
-            {
-                'posted': len(entries),
-                'description': details,
-                'amount': f'{amount_decimal:.2f}',
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return Response({
+            "message": f"Dues posted successfully.",
+            "posted_to": len(result["successes"]),
+            "failed": len(result["failures"]),
+            "failures": result["failures"],
+        })
