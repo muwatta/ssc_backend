@@ -11,7 +11,6 @@ class SSCTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Staff ID is the username field
         staff_id = attrs.get("staff_id") or attrs.get(self.username_field)
 
-        # ── Check Staff ID is in the registry ───────────────────────
         if not StaffIDRegistry.objects.filter(staff_id=staff_id, is_active=True).exists():
             raise serializers.ValidationError(
                 {"staff_id": "This Staff ID is not recognised or has been deactivated."}
@@ -20,7 +19,6 @@ class SSCTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         user = self.user
 
-        # ── Add SSC-specific claims to the response body ─────────────
         data["role"] = user.role
         data["staff_id"] = user.staff_id
         data["is_first_login"] = user.is_first_login
@@ -48,9 +46,7 @@ class SSCTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
 
-# ─────────────────────────────────────────────────────────────────
 # STAFF ID REGISTRY
-# ─────────────────────────────────────────────────────────────────
 
 class StaffIDRegistrySerializer(serializers.ModelSerializer):
     class Meta:
@@ -59,9 +55,7 @@ class StaffIDRegistrySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
-# ─────────────────────────────────────────────────────────────────
 # FIRST LOGIN — Password Setup
-# ─────────────────────────────────────────────────────────────────
 
 class SetInitialPasswordSerializer(serializers.Serializer):
     staff_id = serializers.CharField()
@@ -88,9 +82,7 @@ class SetInitialPasswordSerializer(serializers.Serializer):
         return user
 
 
-# ─────────────────────────────────────────────────────────────────
 # ADMIN: Create User (Admin UI)
-# ─────────────────────────────────────────────────────────────────
 
 class CreateUserSerializer(serializers.Serializer):
     staff_id = serializers.CharField()
@@ -99,7 +91,6 @@ class CreateUserSerializer(serializers.Serializer):
     is_first_login = serializers.BooleanField(default=False)
 
     def validate_staff_id(self, value):
-        # Staff ID must already exist in the registry and be active
         if not StaffIDRegistry.objects.filter(staff_id=value, is_active=True).exists():
             raise serializers.ValidationError("This Staff ID is not registered or has been deactivated.")
         if User.objects.filter(staff_id=value).exists():
@@ -123,15 +114,10 @@ class CreateUserSerializer(serializers.Serializer):
         return user
 
 
-# ─────────────────────────────────────────────────────────────────
 # MEMBER PROFILE
-# ─────────────────────────────────────────────────────────────────
 
 class MemberProfileSerializer(serializers.ModelSerializer):
-    """
-    Full member profile — used by Admin for create/update.
-    Read-only for the member themselves.
-    """
+    
     staff_id = serializers.CharField(source="user.staff_id", read_only=True)
     role = serializers.CharField(source="user.role", read_only=True)
     is_loan_eligible = serializers.BooleanField(read_only=True)
@@ -214,11 +200,13 @@ class MemberProfileSerializer(serializers.ModelSerializer):
 
 
 class MemberProfileSummarySerializer(serializers.ModelSerializer):
-    """
-    Lightweight serializer — used in dropdowns, surety search, loan forms.
-    Never exposes sensitive financial data to wrong roles.
-    """
-    class Meta:
+        staff_id = serializers.CharField(source="user.staff_id", read_only=True)
+        full_name = serializers.CharField(read_only=True)
+        school_branch = serializers.CharField(read_only=True)
+        designation = serializers.CharField(read_only=True)
+        membership_status = serializers.CharField(read_only=True)
+
+class Meta:
         model = MemberProfile
         fields = [
             "id",
@@ -230,11 +218,9 @@ class MemberProfileSummarySerializer(serializers.ModelSerializer):
         ]
 
 
-# ─────────────────────────────────────────────────────────────────
 # ADMIN: Create Member Account
 # Creates User + MemberProfile in a single atomic transaction.
 # File number is auto-generated.
-# ─────────────────────────────────────────────────────────────────
 
 class CreateMemberSerializer(serializers.Serializer):
     # User fields
@@ -308,7 +294,6 @@ class CreateMemberSerializer(serializers.Serializer):
         legacy_file_number = validated_data.pop("legacy_file_number", "")
         proposed_contribution = validated_data.pop("proposed_monthly_contribution")
 
-        # Create User (no password — first login flow sets it)
         user = User.objects.create_user(
             staff_id=staff_id,
             role=role,
@@ -320,7 +305,6 @@ class CreateMemberSerializer(serializers.Serializer):
         # Determine file number
         if is_legacy and legacy_file_number:
             file_number = legacy_file_number
-            # Extract sequence number from legacy e.g. A048 → 48
             seq_str = legacy_file_number.lstrip("A").lstrip("0") or "0"
             file_sequence = int(seq_str)
         else:

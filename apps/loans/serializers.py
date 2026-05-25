@@ -49,6 +49,16 @@ class SubmitLoanSerializer(serializers.Serializer):
     repayment_start_hijri_month = serializers.IntegerField(min_value=1, max_value=12)
     repayment_start_hijri_year  = serializers.IntegerField(min_value=1400)
 
+    def validate_amount_applied(self, value):
+        if value <= Decimal("0.00"):
+            raise serializers.ValidationError("Loan amount must be greater than zero.")
+        return value
+
+    def validate_proposed_monthly_repayment(self, value):
+        if value <= Decimal("0.00"):
+            raise serializers.ValidationError("Monthly repayment must be greater than zero.")
+        return value
+
     def validate(self, attrs):
         request = self.context.get("request")
         if request:
