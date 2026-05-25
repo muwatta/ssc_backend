@@ -4,8 +4,10 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from apps.accounts.models import MemberProfile
+from apps.notifications.models import NotificationType
 from apps.savings.services import get_or_create_balance, post_debit_entry
 from apps.savings.models import LedgerEntryType
+from apps.sureties.services import create_surety_records
 from utils.hijri import hijri_month_display
 from .models import LoanApplication, LoanRepaymentLedger, LoanStatus
 

@@ -4,16 +4,18 @@ from rest_framework import serializers
 from decimal import Decimal
 from .models import LoanApplication, LoanRepaymentLedger, LoanStatus
 from .services import MAX_REPAYMENT_MONTHS, calculate_max_borrowable, check_loan_eligibility
+from apps.sureties.serializers import SuretyRecordSerializer
 
 
 class LoanApplicationSerializer(serializers.ModelSerializer):
+    sureties = SuretyRecordSerializer(many=True, read_only=True)
     applicant_file_number = serializers.CharField(source="applicant.file_number", read_only=True)
     applicant_name        = serializers.CharField(source="applicant.full_name", read_only=True)
 
     class Meta:
         model  = LoanApplication
         fields = [
-            "id", "applicant", "applicant_file_number", "applicant_name",
+            "id", "applicant", "applicant_file_number", "applicant_name", "sureties",
             "home_address", "phone_numbers", "school_branch", "designation",
             "date_joined_cooperative", "monthly_contribution", "total_amount_saved", "monthly_salary",
             "date_of_last_loan", "amount_outstanding_prev",
@@ -27,7 +29,7 @@ class LoanApplicationSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
         read_only_fields = [
-            "id", "applicant", "applicant_file_number", "applicant_name",
+            "id", "applicant", "applicant_file_number", "applicant_name", "sureties",
             "school_branch", "designation", "date_joined_cooperative",
             "monthly_contribution", "total_amount_saved",
             "status", "amount_approved", "outstanding_balance",
@@ -49,6 +51,17 @@ class SubmitLoanSerializer(serializers.Serializer):
     repayment_start_hijri_month = serializers.IntegerField(min_value=1, max_value=12)
     repayment_start_hijri_year  = serializers.IntegerField(min_value=1400)
 
+    class SuretyItemSerializer(serializers.Serializer):
+        member_id = serializers.IntegerField()
+        amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+
+    sureties = serializers.ListSerializer(
+        child=SuretyItemSerializer(),
+        min_length=1,
+        allow_empty=False,
+        max_length=5,
+    )
+
     def validate_amount_applied(self, value):
         if value <= Decimal("0.00"):
             raise serializers.ValidationError("Loan amount must be greater than zero.")
@@ -57,6 +70,54 @@ class SubmitLoanSerializer(serializers.Serializer):
     def validate_proposed_monthly_repayment(self, value):
         if value <= Decimal("0.00"):
             raise serializers.ValidationError("Monthly repayment must be greater than zero.")
+        return value
+
+    def validate_sureties(self, value):
+        from apps.accounts.models import MemberProfile
+
+        request = self.context.get("request")
+        if not request:
+            raise serializers.ValidationError("Request context required.")
+
+        profile = request.user.member_profile
+        if len(value) > 5:
+            raise serializers.ValidationError("Maximum 5 external sureties (SRS SR3).")
+
+        seen = set()
+        errors = []
+        for item in value:
+            member_id = item.get("member_id")
+            amount = item.get("amount")
+            if member_id is None or amount is None:
+                raise serializers.ValidationError("Each surety must include member_id and amount.")
+
+            try:
+                member = MemberProfile.objects.get(pk=member_id)
+            except MemberProfile.DoesNotExist:
+                raise serializers.ValidationError(f"Surety member {member_id} not found.")
+
+            if member.pk == profile.pk:
+                raise serializers.ValidationError("Cannot add yourself as an external surety.")
+
+            if member.pk in seen:
+                raise serializers.ValidationError("Duplicate surety selected.")
+            seen.add(member.pk)
+
+            try:
+                amount_decimal = Decimal(str(amount))
+            except Exception:
+                raise serializers.ValidationError("Surety amount must be a valid number.")
+
+            if amount_decimal <= Decimal("0.00"):
+                raise serializers.ValidationError("Surety amount must be greater than zero.")
+
+            eligibility = check_surety_eligibility(member, amount_decimal)
+            if not eligibility["eligible"]:
+                errors.extend([f"{member.file_number}: {reason}" for reason in eligibility["reasons"]])
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
         return value
 
     def validate(self, attrs):

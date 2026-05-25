@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     PostSavingsView, MemberLedgerView, MemberBalanceView,
-    MyBalanceView, MyLedgerView,
+    MyBalanceView, MyLedgerView, SavingsSummaryView,
     SavingsChangeRequestListCreateView, ApproveSavingsChangeView, RejectSavingsChangeView,
     DuesCycleListCreateView, PostDuesCycleView,
 )
@@ -9,6 +9,7 @@ from .views import (
 urlpatterns = [
     path("post/",                          PostSavingsView.as_view(),                    name="savings-post"),
     path("my-balance/",                    MyBalanceView.as_view(),                      name="my-balance"),
+    path("summary/",                       SavingsSummaryView.as_view(),                  name="savings-summary"),
     path("my-ledger/",                     MyLedgerView.as_view(),                       name="my-ledger"),
     path("balance/<int:member_id>/",       MemberBalanceView.as_view(),                  name="member-balance"),
     path("ledger/<int:member_id>/",        MemberLedgerView.as_view(),                   name="member-ledger"),

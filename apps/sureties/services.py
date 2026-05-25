@@ -4,8 +4,10 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from apps.accounts.models import MemberProfile
+from apps.notifications.models import NotificationType, send_notification
 from apps.savings.services import get_or_create_balance, post_debit_entry
 from apps.savings.models import LedgerEntryType
+from apps.loans.models import LoanStatus
 from .models import SuretyRecord, SuretyStatus
 
 MAX_EXTERNAL_SURETIES     = 5     # SRS SR3
@@ -69,6 +71,15 @@ def create_surety_records(loan, surety_data: list) -> list:
             record.confirmed_at = timezone.now()
             record.save(update_fields=["confirmed_at"])
 
+        if not is_self and hasattr(member, "user") and member.user is not None:
+            send_notification(
+                member.user,
+                NotificationType.SURETY_REQUEST,
+                f"Surety request for Loan #{loan.id}",
+                f"{loan.applicant.full_name} has requested your consent as a surety for ₦{record.amount_guaranteed}.",
+                related_id=loan.id,
+            )
+
         records.append(record)
     return records
 
@@ -97,6 +108,25 @@ def confirm_surety(surety_record: SuretyRecord) -> SuretyRecord:
     surety_record.confirmed_at = timezone.now()
     surety_record.save(update_fields=["status", "confirmed_at", "updated_at"])
 
+    if surety_record.loan.status == LoanStatus.PENDING_SURETIES:
+        pending = SuretyRecord.objects.filter(
+            loan=surety_record.loan,
+            status=SuretyStatus.PENDING,
+            is_self_surety=False,
+        ).exists()
+        if not pending:
+            surety_record.loan.status = LoanStatus.SUBMITTED
+            surety_record.loan.save(update_fields=["status"])
+
+    if hasattr(surety_record.loan.applicant, "user") and surety_record.loan.applicant.user is not None:
+        send_notification(
+            surety_record.loan.applicant.user,
+            NotificationType.SURETY_CONFIRMED,
+            f"Surety confirmed for Loan #{surety_record.loan.id}",
+            f"{surety_record.surety.full_name} has confirmed your surety request for ₦{surety_record.amount_guaranteed}.",
+            related_id=surety_record.loan.id,
+        )
+
     return surety_record
 
 
@@ -104,6 +134,16 @@ def confirm_surety(surety_record: SuretyRecord) -> SuretyRecord:
 def decline_surety(surety_record: SuretyRecord) -> SuretyRecord:
     surety_record.status = SuretyStatus.DECLINED
     surety_record.save(update_fields=["status", "updated_at"])
+
+    if hasattr(surety_record.loan.applicant, "user") and surety_record.loan.applicant.user is not None:
+        send_notification(
+            surety_record.loan.applicant.user,
+            NotificationType.SURETY_DECLINED,
+            f"Surety declined for Loan #{surety_record.loan.id}",
+            f"{surety_record.surety.full_name} has declined your surety request.",
+            related_id=surety_record.loan.id,
+        )
+
     return surety_record
 
 

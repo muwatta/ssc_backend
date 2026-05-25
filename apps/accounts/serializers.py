@@ -272,7 +272,7 @@ class CreateMemberSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "This Staff ID is not in the registry or has been deactivated."
             )
-        # Must not already have an account
+
         if User.objects.filter(staff_id=value).exists():
             raise serializers.ValidationError(
                 "An account already exists for this Staff ID."

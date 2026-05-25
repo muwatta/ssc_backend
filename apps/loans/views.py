@@ -18,7 +18,8 @@ from .serializers import (
 )
 from .services import (
     check_loan_eligibility, calculate_max_borrowable,
-    submit_loan_application, committee_approve_loan, committee_reject_loan,
+    submit_loan_application, create_surety_records,
+    committee_approve_loan, committee_reject_loan,
     hos_approve_loan, post_repayment, handle_default_or_exit,
 )
 
@@ -92,6 +93,26 @@ class SubmitLoanView(APIView):
             })
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        surety_items = [
+            {
+                "member_id": profile.pk,
+                "amount": d["amount_applied"],
+                "layer": 1,
+            }
+        ]
+        for idx, item in enumerate(d.get("sureties", []), start=2):
+            surety_items.append({
+                "member_id": item["member_id"],
+                "amount": item["amount"],
+                "layer": idx,
+            })
+
+        if surety_items:
+            create_surety_records(loan, surety_items)
+            if len(d.get("sureties", [])) > 0:
+                loan.status = LoanStatus.PENDING_SURETIES
+                loan.save(update_fields=["status"])
 
         # Update repayment schedule dates on the loan
         loan.repayment_start_hijri_month = d["repayment_start_hijri_month"]

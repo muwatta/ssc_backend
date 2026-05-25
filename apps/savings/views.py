@@ -1,6 +1,10 @@
 """SSC Cooperative — Savings Views"""
 
+from decimal import Decimal
+from django.db.models import Count, ExpressionWrapper, F, Sum
+from django.db.models import DecimalField
 from rest_framework import generics, status, filters
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -82,6 +86,40 @@ class MemberBalanceView(APIView):
 
         balance = get_or_create_balance(member)
         return Response(MemberBalanceSerializer(balance).data)
+
+
+class SavingsSummaryView(APIView):
+    """GET /api/v1/savings/summary/ — current user and cooperative balances"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.member_profile
+        except Exception:
+            return Response({"error": "No member profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        member_balance = get_or_create_balance(profile)
+        summary = MemberBalance.objects.aggregate(
+            total_savings=Sum("total_savings"),
+            total_committed=Sum("suretyship_committed"),
+            total_available=Sum(
+                ExpressionWrapper(
+                    F("total_savings") - F("suretyship_committed"),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                )
+            ),
+            member_count=Count("id"),
+        )
+
+        return Response({
+            "member": MemberBalanceSerializer(member_balance).data,
+            "cooperative": {
+                "total_savings": str(summary["total_savings"] or Decimal("0.00")),
+                "total_committed": str(summary["total_committed"] or Decimal("0.00")),
+                "total_available": str(summary["total_available"] or Decimal("0.00")),
+                "member_count": summary["member_count"] or 0,
+            },
+        })
 
 
 class MyBalanceView(APIView):

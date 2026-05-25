@@ -209,7 +209,7 @@ class MemberSummaryListView(generics.ListAPIView):
     Active members only.
     """
     serializer_class = MemberProfileSummarySerializer
-    permission_classes = [IsAdminOrCommittee]
+    permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter]
     search_fields = ["file_number", "full_name"]
 
