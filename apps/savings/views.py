@@ -93,30 +93,29 @@ class SavingsSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        try:
-            profile = request.user.member_profile
-        except Exception:
-            return Response({"error": "No member profile found."}, status=status.HTTP_404_NOT_FOUND)
+        profile = getattr(request.user, "member_profile", None)
+        member_data = None
 
-        member_balance = get_or_create_balance(profile)
+        if profile is not None:
+            member_balance = get_or_create_balance(profile)
+            member_data = MemberBalanceSerializer(member_balance).data
+
         summary = MemberBalance.objects.aggregate(
             total_savings=Sum("total_savings"),
             total_committed=Sum("suretyship_committed"),
-            total_available=Sum(
-                ExpressionWrapper(
-                    F("total_savings") - F("suretyship_committed"),
-                    output_field=DecimalField(max_digits=14, decimal_places=2),
-                )
-            ),
             member_count=Count("id"),
         )
 
+        total_savings = summary["total_savings"] or Decimal("0.00")
+        total_committed = summary["total_committed"] or Decimal("0.00")
+        total_available = total_savings - total_committed
+
         return Response({
-            "member": MemberBalanceSerializer(member_balance).data,
+            "member": member_data,
             "cooperative": {
-                "total_savings": str(summary["total_savings"] or Decimal("0.00")),
-                "total_committed": str(summary["total_committed"] or Decimal("0.00")),
-                "total_available": str(summary["total_available"] or Decimal("0.00")),
+                "total_savings": str(total_savings),
+                "total_committed": str(total_committed),
+                "total_available": str(total_available),
                 "member_count": summary["member_count"] or 0,
             },
         })

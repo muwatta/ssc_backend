@@ -200,13 +200,13 @@ class MemberProfileSerializer(serializers.ModelSerializer):
 
 
 class MemberProfileSummarySerializer(serializers.ModelSerializer):
-        staff_id = serializers.CharField(source="user.staff_id", read_only=True)
-        full_name = serializers.CharField(read_only=True)
-        school_branch = serializers.CharField(read_only=True)
-        designation = serializers.CharField(read_only=True)
-        membership_status = serializers.CharField(read_only=True)
+    staff_id = serializers.CharField(source="user.staff_id", read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    school_branch = serializers.CharField(read_only=True)
+    designation = serializers.CharField(read_only=True)
+    membership_status = serializers.CharField(read_only=True)
 
-class Meta:
+    class Meta:
         model = MemberProfile
         fields = [
             "id",
@@ -218,16 +218,10 @@ class Meta:
         ]
 
 
-# ADMIN: Create Member Account
-# Creates User + MemberProfile in a single atomic transaction.
-# File number is auto-generated.
-
 class CreateMemberSerializer(serializers.Serializer):
-    # User fields
     staff_id = serializers.CharField()
     role = serializers.ChoiceField(choices=Role.choices, default=Role.STAFF)
 
-    # Profile fields — all required at creation
     full_name = serializers.CharField(max_length=255)
     phone_primary = serializers.CharField(max_length=20)
     phone_secondary = serializers.CharField(max_length=20, allow_blank=True, default="")
