@@ -84,7 +84,16 @@ class MemberBalanceView(APIView):
             if member.user != request.user:
                 return Response({"error": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
 
-        balance = get_or_create_balance(member)
+        try:
+            balance = get_or_create_balance(member)
+        except ProgrammingError:
+            balance = MemberBalance(
+                member=member,
+                total_savings=Decimal("0.00"),
+                suretyship_committed=Decimal("0.00"),
+                updated_at=None,
+            )
+
         return Response(MemberBalanceSerializer(balance).data)
 
 
@@ -135,7 +144,17 @@ class MyBalanceView(APIView):
             profile = request.user.member_profile
         except Exception:
             return Response({"error": "No member profile found."}, status=status.HTTP_404_NOT_FOUND)
-        balance = get_or_create_balance(profile)
+
+        try:
+            balance = get_or_create_balance(profile)
+        except ProgrammingError:
+            balance = MemberBalance(
+                member=profile,
+                total_savings=Decimal("0.00"),
+                suretyship_committed=Decimal("0.00"),
+                updated_at=None,
+            )
+
         return Response(MemberBalanceSerializer(balance).data)
 
 

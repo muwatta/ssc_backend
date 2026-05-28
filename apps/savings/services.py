@@ -5,6 +5,7 @@ This keeps views thin and business rules testable.
 """
 
 from django.db import transaction
+from django.db.utils import ProgrammingError
 from django.utils import timezone
 from decimal import Decimal
 from apps.accounts.models import MemberProfile, MembershipStatus
@@ -13,11 +14,19 @@ from utils.hijri import hijri_month_display
 
 
 def get_or_create_balance(member: MemberProfile) -> MemberBalance:
-    balance, _ = MemberBalance.objects.get_or_create(
-        member=member,
-        defaults={"total_savings": Decimal("0.00"), "suretyship_committed": Decimal("0.00")}
-    )
-    return balance
+    try:
+        balance, _ = MemberBalance.objects.get_or_create(
+            member=member,
+            defaults={"total_savings": Decimal("0.00"), "suretyship_committed": Decimal("0.00")}
+        )
+        return balance
+    except ProgrammingError:
+        return MemberBalance(
+            member=member,
+            total_savings=Decimal("0.00"),
+            suretyship_committed=Decimal("0.00"),
+            updated_at=None,
+        )
 
 
 @transaction.atomic
