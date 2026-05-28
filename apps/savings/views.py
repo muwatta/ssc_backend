@@ -1,5 +1,3 @@
-"""SSC Cooperative — Savings Views"""
-
 from decimal import Decimal
 from django.db.models import Count, Sum
 from django.db.utils import ProgrammingError
@@ -46,32 +44,35 @@ class PostSavingsView(APIView):
 
 
 class MemberLedgerView(generics.ListAPIView):
-    """GET /api/v1/savings/ledger/<member_id>/ — savings ledger for a member"""
     serializer_class = SavingsLedgerSerializer
     filter_backends  = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["hijri_year", "entry_type"]
+    filterset_fields = ["hijri_year", "hijri_month", "entry_type"]
     ordering         = ["hijri_year", "hijri_month", "created_at"]
 
     def get_permissions(self):
-        return [IsAdminOrCommitteeOrHOS()] if self._is_admin_request() else [__import__('rest_framework.permissions', fromlist=['IsAuthenticated']).IsAuthenticated()]
-
-    def _is_admin_request(self):
         user = self.request.user
-        return user.role in ("admin", "committee", "head_of_school")
+        if user.is_authenticated and user.role in ("admin", "committee", "head_of_school"):
+            return [IsAdminOrCommitteeOrHOS()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         member_id = self.kwargs["member_id"]
         user = self.request.user
         if user.role in ("admin", "committee", "head_of_school"):
-            return SavingsLedger.objects.filter(member_id=member_id).select_related("member")
-        # Staff: only own ledger
-        return SavingsLedger.objects.filter(
-            member_id=member_id, member__user=user
-        ).select_related("member")
-
+            qs = SavingsLedger.objects.filter(member_id=member_id).select_related("member")
+        else:
+            qs = SavingsLedger.objects.filter(
+                member_id=member_id, member__user=user
+            ).select_related("member")
+        date_from = self.request.query_params.get("date_from")
+        date_to   = self.request.query_params.get("date_to")
+        if date_from:
+            qs = qs.filter(gregorian_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(gregorian_date__lte=date_to)
+        return qs
 
 class MemberBalanceView(APIView):
-    """GET /api/v1/savings/balance/<member_id>/"""
     permission_classes = [IsAdminOrCommitteeOrHOS]
 
     def get(self, request, member_id):
@@ -98,7 +99,6 @@ class MemberBalanceView(APIView):
 
 
 class SavingsSummaryView(APIView):
-    """GET /api/v1/savings/summary/ — current user and cooperative balances"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -142,7 +142,6 @@ class SavingsSummaryView(APIView):
 
 
 class MyBalanceView(APIView):
-    """GET /api/v1/savings/my-balance/ — logged-in member's own balance"""
     def get(self, request):
         try:
             profile = request.user.member_profile
@@ -163,7 +162,6 @@ class MyBalanceView(APIView):
 
 
 class MyLedgerView(generics.ListAPIView):
-    """GET /api/v1/savings/my-ledger/ — logged-in member's own ledger"""
     serializer_class = SavingsLedgerSerializer
 
     def get_queryset(self):
@@ -174,10 +172,9 @@ class MyLedgerView(generics.ListAPIView):
             return SavingsLedger.objects.none()
 
 
-# ── Savings Change Requests ───────────────────────────────────────
+# Savings Change Requests
 
 class SavingsChangeRequestListCreateView(generics.ListCreateAPIView):
-    """GET/POST /api/v1/savings/change-requests/"""
     serializer_class = SavingsChangeRequestSerializer
     filter_backends  = [DjangoFilterBackend]
     filterset_fields = ["status"]
@@ -211,7 +208,6 @@ class SavingsChangeRequestListCreateView(generics.ListCreateAPIView):
 
 
 class ApproveSavingsChangeView(APIView):
-    """POST /api/v1/savings/change-requests/<id>/approve/"""
     permission_classes = [IsAdmin]
 
     def post(self, request, pk):
@@ -234,7 +230,6 @@ class ApproveSavingsChangeView(APIView):
 
 
 class RejectSavingsChangeView(APIView):
-    """POST /api/v1/savings/change-requests/<id>/reject/"""
     permission_classes = [IsAdmin]
 
     def post(self, request, pk):
@@ -247,10 +242,9 @@ class RejectSavingsChangeView(APIView):
         return Response(SavingsChangeRequestSerializer(change_req).data)
 
 
-# ── Termly Dues ───────────────────────────────────────────────────
+# Termly Dues
 
 class DuesCycleListCreateView(generics.ListCreateAPIView):
-    """GET/POST /api/v1/savings/dues/"""
     permission_classes = [IsAdmin]
     filter_backends    = [DjangoFilterBackend]
     filterset_fields   = ["is_posted", "hijri_year"]
@@ -284,7 +278,6 @@ class DuesCycleListCreateView(generics.ListCreateAPIView):
 
 
 class PostDuesCycleView(APIView):
-    """POST /api/v1/savings/dues/<id>/post/ — actually debit members"""
     permission_classes = [IsAdmin]
 
     def post(self, request, pk):
