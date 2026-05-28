@@ -102,7 +102,11 @@ class SavingsSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = getattr(request.user, "member_profile", None)
+        try:
+            profile = request.user.member_profile
+        except MemberProfile.DoesNotExist:
+            profile = None
+
         member_data = None
 
         try:

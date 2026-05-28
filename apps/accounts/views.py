@@ -245,13 +245,7 @@ class MyProfileView(APIView):
     def get(self, request):
         profile = self.get_object()
         if profile is None:
-            from rest_framework.exceptions import NotFound
-            msg = (
-                "Profile not found. Please create your Member Profile by filling "
-                "out the profile form. If you cannot create a profile, contact an "
-                "administrator."
-            )
-            raise NotFound(msg)
+            return Response(None)
 
         serializer = MemberProfileSerializer(profile)
         return Response(serializer.data)

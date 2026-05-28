@@ -79,7 +79,11 @@ class SubmitLoanSerializer(serializers.Serializer):
         if not request:
             raise serializers.ValidationError("Request context required.")
 
-        profile = request.user.member_profile
+        try:
+            profile = request.user.member_profile
+        except MemberProfile.DoesNotExist:
+            raise serializers.ValidationError("No member profile found.")
+
         if len(value) > 5:
             raise serializers.ValidationError("Maximum 5 external sureties (SRS SR3).")
 
@@ -125,7 +129,7 @@ class SubmitLoanSerializer(serializers.Serializer):
         if request:
             try:
                 profile = request.user.member_profile
-            except Exception:
+            except MemberProfile.DoesNotExist:
                 raise serializers.ValidationError("No member profile found.")
 
             eligibility = check_loan_eligibility(profile)
