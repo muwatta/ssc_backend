@@ -1,8 +1,8 @@
 """SSC Cooperative — Savings Views"""
 
 from decimal import Decimal
-from django.db.models import Count, ExpressionWrapper, F, Sum
-from django.db.models import DecimalField
+from django.db.models import Count, Sum
+from django.db.utils import ProgrammingError
 from rest_framework import generics, status, filters
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -96,19 +96,26 @@ class SavingsSummaryView(APIView):
         profile = getattr(request.user, "member_profile", None)
         member_data = None
 
-        if profile is not None:
-            member_balance = get_or_create_balance(profile)
-            member_data = MemberBalanceSerializer(member_balance).data
+        try:
+            if profile is not None:
+                member_balance = get_or_create_balance(profile)
+                member_data = MemberBalanceSerializer(member_balance).data
 
-        summary = MemberBalance.objects.aggregate(
-            total_savings=Sum("total_savings"),
-            total_committed=Sum("suretyship_committed"),
-            member_count=Count("id"),
-        )
+            summary = MemberBalance.objects.aggregate(
+                total_savings=Sum("total_savings"),
+                total_committed=Sum("suretyship_committed"),
+                member_count=Count("id"),
+            )
 
-        total_savings = summary["total_savings"] or Decimal("0.00")
-        total_committed = summary["total_committed"] or Decimal("0.00")
-        total_available = total_savings - total_committed
+            total_savings = summary["total_savings"] or Decimal("0.00")
+            total_committed = summary["total_committed"] or Decimal("0.00")
+            total_available = total_savings - total_committed
+        except ProgrammingError:
+            total_savings = Decimal("0.00")
+            total_committed = Decimal("0.00")
+            total_available = Decimal("0.00")
+            summary = {"member_count": 0}
+            member_data = None
 
         return Response({
             "member": member_data,

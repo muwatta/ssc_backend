@@ -1,4 +1,3 @@
-
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
@@ -6,6 +5,7 @@ from .models import User, StaffIDRegistry, MemberProfile, Role, generate_file_nu
 
 
 class SSCTokenObtainPairSerializer(TokenObtainPairSerializer):
+    username_field = "staff_id"
 
     def validate(self, attrs):
         # Staff ID is the username field
@@ -201,22 +201,18 @@ class MemberProfileSerializer(serializers.ModelSerializer):
 
 class MemberProfileSummarySerializer(serializers.ModelSerializer):
     staff_id = serializers.CharField(source="user.staff_id", read_only=True)
-    full_name = serializers.CharField(read_only=True)
-    school_branch = serializers.CharField(read_only=True)
-    designation = serializers.CharField(read_only=True)
-    membership_status = serializers.CharField(read_only=True)
 
     class Meta:
         model = MemberProfile
         fields = [
             "id",
             "file_number",
+            "staff_id",
             "full_name",
             "school_branch",
             "designation",
             "membership_status",
         ]
-
 
 class CreateMemberSerializer(serializers.Serializer):
     staff_id = serializers.CharField()
