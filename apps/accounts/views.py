@@ -24,6 +24,7 @@ from .permissions import (
     IsAdminOrCommitteeOrHOS,
     IsProfileOwnerOrAdmin,
 )
+from apps.audit.utils import log_action, get_client_ip
 # Authentication views (login/logout, password setup)
 
 class SSCTokenObtainPairView(TokenObtainPairView):
@@ -260,6 +261,19 @@ class MyProfileView(APIView):
         serializer = MemberProfileSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         profile = serializer.save()
+
+        # Log the action
+        log_action(
+            user=request.user,
+            action="profile_create",
+            description=f"Created member profile",
+            object_type="MemberProfile",
+            object_id=profile.id,
+            object_name=profile.full_name,
+            new_values={"file_number": profile.file_number, "full_name": profile.full_name},
+            request_ip=get_client_ip(request),
+        )
+
         return Response(MemberProfileSerializer(profile).data, status=status.HTTP_201_CREATED)
 
     def patch(self, request):
